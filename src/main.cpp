@@ -155,9 +155,9 @@ int main(int argc, char* argv[]) {
   out_file_ << "vy_true" << "\t";
   out_file_ << "NIS" << "\n";
 
-
   for (size_t k = 0; k < number_of_measurements; ++k) {
     // Call the UKF-based fusion
+	cout << "Process " << k << " measurement" << endl;
     ukf.ProcessMeasurement(measurement_pack_list[k]);
 
     // output the estimation

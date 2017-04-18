@@ -11,6 +11,7 @@
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 
+
 class UKF {
 public:
 
@@ -108,6 +109,51 @@ public:
    * @param meas_package The measurement at k+1
    */
   void UpdateRadar(MeasurementPackage meas_package);
+
+private:
+  void GenerateSigmaPoints(MatrixXd &Xsig);
+  void AugmentedSigmaPoints(MatrixXd& Xsig_aug);
+  void PredictSigmaPoints(const MatrixXd& Xsig_aug, double delta_t);
+};
+
+
+class UKFMeasurement {
+public:
+	UKFMeasurement(UKF &ukf): ukf_(ukf) { };
+	virtual ~UKFMeasurement() { };
+	
+	virtual void UpdateState(const MeasurementPackage &z);
+
+protected:
+	virtual bool PredictMeasurement(const MeasurementPackage &z) = 0;
+
+	UKF &ukf_;
+	MatrixXd Zsig_pred_;  // sigma points in measurement space
+	VectorXd z_pred_;     // mean sigma points
+	MatrixXd S_;          // measurement covariance
+
+	VectorXd z_;  // radar measure value
+	int n_z_;
+};
+	
+class UKFRadarMeasurement: public UKFMeasurement {
+public:
+	UKFRadarMeasurement(UKF &ukf): UKFMeasurement(ukf) { n_z_ = 3; }
+			
+	~UKFRadarMeasurement() { };
+	
+protected:
+	virtual bool PredictMeasurement(const MeasurementPackage &z);
+};
+
+class UKFLaserMeasurement: public UKFMeasurement {
+public:
+	UKFLaserMeasurement(UKF &ukf): UKFMeasurement(ukf) { n_z_ = 2; }
+	
+	~UKFLaserMeasurement() { }
+	
+protected:
+	virtual bool PredictMeasurement(const MeasurementPackage &z);
 };
 
 #endif /* UKF_H */
