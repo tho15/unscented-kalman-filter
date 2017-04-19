@@ -74,7 +74,10 @@ public:
 
   ///* the current NIS for laser
   double NIS_laser_;
-
+  
+  ///* last measurement package
+  MeasurementPackage last_meas;
+  
   /**
    * Constructor
    */
@@ -109,11 +112,14 @@ public:
    * @param meas_package The measurement at k+1
    */
   void UpdateRadar(MeasurementPackage meas_package);
+  
+  void NormalizeAngle(double &angle);  // helper function
 
 private:
   void GenerateSigmaPoints(MatrixXd &Xsig);
-  void AugmentedSigmaPoints(MatrixXd& Xsig_aug);
+  void GenerateAugmentedSigmaPoints(MatrixXd& Xsig_aug);
   void PredictSigmaPoints(const MatrixXd& Xsig_aug, double delta_t);
+  void InitMeasurement(MeasurementPackage meas_package);
 };
 
 
@@ -139,7 +145,6 @@ protected:
 class UKFRadarMeasurement: public UKFMeasurement {
 public:
 	UKFRadarMeasurement(UKF &ukf): UKFMeasurement(ukf) { n_z_ = 3; }
-			
 	~UKFRadarMeasurement() { };
 	
 protected:
@@ -148,12 +153,16 @@ protected:
 
 class UKFLaserMeasurement: public UKFMeasurement {
 public:
-	UKFLaserMeasurement(UKF &ukf): UKFMeasurement(ukf) { n_z_ = 2; }
-	
+	UKFLaserMeasurement(UKF &ukf);	
 	~UKFLaserMeasurement() { }
 	
+	virtual void UpdateState(const MeasurementPackage &z);
+	
+	MatrixXd H_;
+    MatrixXd R_;
+	
 protected:
-	virtual bool PredictMeasurement(const MeasurementPackage &z);
+	virtual bool PredictMeasurement(const MeasurementPackage &z) { return false; }
 };
 
 #endif /* UKF_H */

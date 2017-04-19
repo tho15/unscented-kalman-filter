@@ -60,8 +60,8 @@ UKF::UKF() {
   
   P_ << 1, 0, 0, 0, 0,
   		0, 1, 0, 0, 0,
-  		0, 0, 1000, 0, 0,
-  		0, 0, 0, 1000, 0,
+  		0, 0, 1, 0, 0,
+  		0, 0, 0, 1, 0,
 		0, 0, 0, 0, 1;
   
   // initialize weights
@@ -112,7 +112,7 @@ inline void UKF::NormalizeAngle(double &angle)
 	while (angle <-M_PI) angle+=2.*M_PI;
 }
 
-void UKF::AugmentedSigmaPoints(MatrixXd& Xsig_aug)
+void UKF::GenerateAugmentedSigmaPoints(MatrixXd& Xsig_aug)
 {
 	// augmented mean vector
 	VectorXd x_aug = VectorXd(7);
@@ -140,6 +140,10 @@ void UKF::AugmentedSigmaPoints(MatrixXd& Xsig_aug)
   
 	// create square root matrix
 	MatrixXd A = P_aug.llt().matrixL();
+	if (P_aug.llt().info() == Eigen::NumericalIssue) {
+		std::cout << "llt failed! we have numerical issue" << std::endl;
+		throw std::range_error("llt numerical issue!");
+	}
 	A = std::sqrt(lambda+n_aug)*A;
 	//std::cout << "A is: " << std::endl << A << std::endl;
 	
@@ -148,7 +152,7 @@ void UKF::AugmentedSigmaPoints(MatrixXd& Xsig_aug)
 	for(int i = 1; i <= n_aug; i++) {
 		Xsig_aug.col(i) = x_aug + A.col(i-1);
 		Xsig_aug.col(i+n_aug) = x_aug - A.col(i-1);
-	}	
+	}
 }
 
 void UKF::PredictSigmaPoints(const MatrixXd& Xsig_aug, double delta_t)
@@ -206,6 +210,31 @@ void UKF::PredictSigmaPoints(const MatrixXd& Xsig_aug, double delta_t)
 	}
 }
 
+void UKF::InitMeasurement(MeasurementPackage meas_package)
+{
+	time_us_ = meas_package.timestamp_;
+	  
+    if (meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_) {
+      /**
+      Convert radar from polar to cartesian coordinates and initialize state.
+      */
+      double px = meas_package.raw_measurements_[0]*std::cos(meas_package.raw_measurements_[1]);
+      double py = meas_package.raw_measurements_[0]*std::sin(meas_package.raw_measurements_[1]);
+      
+	  x_ << px, py, 0, 0, 0;
+    }
+    else if (meas_package.sensor_type_ == MeasurementPackage::LASER & use_laser_) {
+      /**
+      Initialize state.
+      */
+      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
+    }
+
+    // done initializing, no need to predict or update
+    is_initialized_ = true;
+	last_meas = meas_package;
+}
+
 /**
  * @param {MeasurementPackage} meas_package The latest measurement data of
  * either radar or laser.
@@ -216,34 +245,26 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
 
   Complete this function! Make sure you switch between lidar and radar
   measurements.
-  */
+  */	  
   if(!is_initialized_) {
-	time_us_ = meas_package.timestamp_;
-	  
-    if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
-      /**
-      Convert radar from polar to cartesian coordinates and initialize state.
-      */
-      double px = meas_package.raw_measurements_[0]*std::cos(meas_package.raw_measurements_[1]);
-      double py = meas_package.raw_measurements_[0]*std::sin(meas_package.raw_measurements_[1]);
-      
-	  x_ << px, py, 0, 0, 0;
-    }
-    else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
-      /**
-      Initialize state.
-      */
-      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
-    }
-    // done initializing, no need to predict or update
-    is_initialized_ = true;
-	//std::cout << "x_ initialized to: " << std::endl << x_ << std::endl;
+	InitMeasurement(meas_package);
     return;
   }
   
   /* prediction */
   double delta_t = (meas_package.timestamp_ - time_us_)/1000000.0;
-  Prediction(delta_t);
+  try {
+	  Prediction(delta_t);
+  } catch(std::range_error e) {
+		P_ << 1, 0, 0, 0, 0,
+		    0, 1, 0, 0, 0,
+			0, 0, 1, 0, 0,
+			0, 0, 0, 1, 0,
+			0, 0, 0, 0, 1;
+		// skip prediction step?
+		InitMeasurement(last_meas);
+		return;  // skip this measurement
+  }
   //std::cout << "x_ after prediction: " << std::endl << x_ << std::endl;
   
   /* then update base on measurement */
@@ -253,7 +274,8 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   else if (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_) {
 	UpdateLidar(meas_package);
   }
-  time_us_ = meas_package.timestamp_;
+  last_meas = meas_package;
+  time_us_  = meas_package.timestamp_;
 }
 
 /**
@@ -270,7 +292,7 @@ void UKF::Prediction(double delta_t) {
   
   // calculate predicted sigma points
   MatrixXd Xsig_aug = MatrixXd(n_aug, 2*n_aug +1);
-  AugmentedSigmaPoints(Xsig_aug);
+  GenerateAugmentedSigmaPoints(Xsig_aug);
   //std::cout << "AugmentedSigmaPoints: " << std::endl << Xsig_aug << endl;
   PredictSigmaPoints(Xsig_aug, delta_t);
 		    
@@ -391,13 +413,13 @@ bool UKFRadarMeasurement::PredictMeasurement(const MeasurementPackage &z)
 		double py  = ukf_.Xsig_pred_(1, i);
 		double v   = ukf_.Xsig_pred_(2, i);
 		double phi = ukf_.Xsig_pred_(3, i);
-      
+		
+		if(px < 0.000001) px = 0.00001;
 		Zsig_pred_(0, i) = std::sqrt(px*px + py*py);
 		if(std::fabs(Zsig_pred_(0, i)) < 0.00001) {
 			std::cout << "rho is zero, invalid px/py!" << std::endl;
 			return false;
 		}
-		if(px < 0.000001) px = 0.00001;
 		Zsig_pred_(1, i) = std::atan2(py, px);
 		Zsig_pred_(2, i) = (px*std::cos(phi)*v + py*std::sin(phi)*v)/Zsig_pred_(0, i);
 	}
