@@ -252,8 +252,14 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   }
   
   /* prediction */
-  double delta_t = (meas_package.timestamp_ - time_us_)/1000000.0;
+  double delta_t = (double)(meas_package.timestamp_ - time_us_)/1000000.0;
+  
   try {
+	  if(delta_t > 0.2) {
+		  const double dt = delta_t/2.0;
+		  Prediction(dt);
+		  delta_t -= dt;
+	  }
 	  Prediction(delta_t);
   } catch(std::range_error e) {
 		P_ << 1, 0, 0, 0, 0,
@@ -301,21 +307,14 @@ void UKF::Prediction(double delta_t) {
   x_ = Xsig_pred_*weights_;
   //std::cout << "x_: " << x_ << std::endl;
   // calculate difference of xsig and x
-  MatrixXd Xsig_t = Xsig_pred_; // temp matrix to hold values
-  for(int i = 0; i < 2*n_aug+1; i++) {
-      Xsig_t.col(i) -= x_;
-	  // angle normalization
-	  NormalizeAngle(Xsig_t(3, i));
+  P_.fill(0.0);
+  for(int i = 1; i < 2*n_aug+1; i++) {
+	  VectorXd x_diff = Xsig_pred_.col(i) - Xsig_pred_.col(0);
+	  //VectorXd x_diff = Xsig_pred_.col(i) - x_;
+	  NormalizeAngle(x_diff(3));
+	  P_ = P_ + weights_(i)*x_diff*x_diff.transpose();
   }
-  
-  // compute values of w*(x_pred -x)
-  MatrixXd X_w(n_x_, 2 * n_aug + 1);
-  for(int i = 0; i < n_x_; i++) {
-      X_w.row(i) = Xsig_t.row(i).array()*weights_.transpose().array();
-  }
-  
-  P_ = X_w*Xsig_t.transpose();
-}
+ }
 
 /**
  * Updates the state and the state covariance matrix using a laser measurement.
@@ -368,8 +367,9 @@ void UKFMeasurement::UpdateState(const MeasurementPackage &z)
 	
 	Tc.fill(0.0);
 	//calculate cross correlation matrix
-	for(int i = 0; i < 2 * n_aug + 1; i++) {
-		VectorXd Xsig_diff = ukf_.Xsig_pred_.col(i) - ukf_.x_;
+	for(int i = 1; i < 2 * n_aug + 1; i++) {
+		VectorXd Xsig_diff = ukf_.Xsig_pred_.col(i) - ukf_.Xsig_pred_.col(0);
+		//VectorXd Xsig_diff = ukf_.Xsig_pred_.col(i) - ukf_.x_;
 		ukf_.NormalizeAngle(Xsig_diff(3));
 		
 		VectorXd z_diff = Zsig_pred_.col(i) - z_pred_;
@@ -432,8 +432,9 @@ bool UKFRadarMeasurement::PredictMeasurement(const MeasurementPackage &z)
 	//calculate measurement covariance matrix S
 	S_ = MatrixXd(n_z_, n_z_);
 	S_.fill(0.0);
-	for(int i = 0; i < 2*n_aug +1; i++) {
-		VectorXd z_diff = Zsig_pred_.col(i) - z_pred_;
+	for(int i = 1; i < 2*n_aug +1; i++) {
+		VectorXd z_diff = Zsig_pred_.col(i) - Zsig_pred_.col(0);
+		//VectorXd z_diff = Zsig_pred_.col(i) - z_pred_;
 		// angle normalization
 		ukf_.NormalizeAngle(z_diff(1));
 		S_ = S_ + ukf_.weights_(i)*z_diff*z_diff.transpose();
@@ -443,6 +444,10 @@ bool UKFRadarMeasurement::PredictMeasurement(const MeasurementPackage &z)
 	S_(0, 0) += ukf_.std_radr_*ukf_.std_radr_;
 	S_(1, 1) += ukf_.std_radphi_*ukf_.std_radphi_;
 	S_(2, 2) += ukf_.std_radrd_*ukf_.std_radrd_;
+	
+	VectorXd zd = z_ - z_pred_;
+	
+	ukf_.NIS_radar_ = zd.transpose()*S_.inverse()*zd;
 	
 	return true;
 }
@@ -473,6 +478,8 @@ void UKFLaserMeasurement::UpdateState(const MeasurementPackage &z)
 	// measurement update
 	ukf_.x_ = ukf_.x_ + K*y;
 	ukf_.P_ = (I - K*H_)*ukf_.P_;
+	
+	ukf_.NIS_laser_ = y.transpose()*S_.inverse()*y;
 }
 
 
