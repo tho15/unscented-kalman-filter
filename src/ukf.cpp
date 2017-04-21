@@ -16,7 +16,7 @@ UKF::UKF() {
 	use_laser_ = true;
 
 	// if this is false, radar measurements will be ignored (except during init)
-	use_radar_ = false;
+	use_radar_ = true;
 
 	// state dimension is 5 (px, py, v, yaw, yaw_rate]
 	n_x_   = 5;
@@ -218,7 +218,7 @@ void UKF::InitMeasurement(MeasurementPackage meas_package)
 		
 		x_ << px, py, 0, 0, 0;
     }
-    else if (meas_package.sensor_type_ == MeasurementPackage::LASER & use_laser_) {
+    else if (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_) {
 		/**
 		 Initialize state.
 		*/
